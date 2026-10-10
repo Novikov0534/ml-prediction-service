@@ -1,0 +1,10 @@
+[Unit]
+Description=Check GHCR for a new ML app image
+
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=2min
+Unit=ml-deploy.service
+
+[Install]
+WantedBy=timers.target
