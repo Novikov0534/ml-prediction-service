@@ -2,10 +2,7 @@ version: "3.8"
 
 services:
   ml-app:
-    image: ml-app:v1
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
+    image: ghcr.io/novikov0534/ml-prediction-service/ml-app:latest
     container_name: ml-app
     env_file:
       - .env
