@@ -5,7 +5,7 @@ IMAGE=ghcr.io/novikov0534/ml-prediction-service/ml-app:latest
 COMPOSE=/home/student/ml-prediction-service/docker/docker-compose.yml
 
 current=$(docker inspect --format '{{.Image}}' ml-app 2>/dev/null || true)
-docker pull "$IMAGE"
+if ! timeout 90s docker pull "$IMAGE"; then echo "Pull failed; existing app remains running" >&2; exit 1; fi
 available=$(docker image inspect --format '{{.Id}}' "$IMAGE")
 
 if [ "$current" = "$available" ]; then
@@ -13,7 +13,6 @@ if [ "$current" = "$available" ]; then
     exit 0
 fi
 
-docker-compose -f "$COMPOSE" down
 docker-compose -f "$COMPOSE" up -d
 
 for attempt in {1..15}; do
