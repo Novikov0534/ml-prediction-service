@@ -16,6 +16,44 @@ def test_health():
     assert response.get_json() == {"status": "ok"}
 
 
+def test_metrics_exposes_prometheus_format():
+    response = service.app.test_client().get("/metrics")
+    assert response.status_code == 200
+    assert response.content_type.startswith("text/plain")
+    assert b"# HELP ml_predictions_total" in response.data
+    assert b"ml_prediction_latency_seconds_bucket" in response.data
+    assert b"ml_model_info" in response.data
+    assert b"ml_model_accuracy{" in response.data
+
+
+def test_metrics_scrape_is_not_counted_as_prediction():
+    from prometheus_client import REGISTRY
+
+    count = REGISTRY.get_sample_value("ml_prediction_latency_seconds_count")
+    before = service.REQUESTS_TOTAL.labels(status="400")._value.get()
+    client = service.app.test_client()
+    client.get("/metrics")
+    assert REGISTRY.get_sample_value("ml_prediction_latency_seconds_count") == count
+    client.post("/predict", json={"features": []})
+    assert service.REQUESTS_TOTAL.labels(status="400")._value.get() == before + 1
+    assert REGISTRY.get_sample_value("ml_prediction_latency_seconds_count") == count + 1
+
+
+def test_database_failure_is_counted(monkeypatch):
+    monkeypatch.setenv("DB_PASSWORD", "test-only")
+    before = service.DB_ERRORS_TOTAL._value.get()
+
+    def fail_connection(**kwargs):
+        raise service.psycopg2.OperationalError("test-only failure")
+
+    monkeypatch.setattr(service.psycopg2, "connect", fail_connection)
+    response = service.app.test_client().post(
+        "/predict", json={"features": [1.0] * 13}
+    )
+    assert response.status_code == 503
+    assert service.DB_ERRORS_TOTAL._value.get() == before + 1
+
+
 @pytest.mark.parametrize("features", [[], [1, 2, 3, 4], [True] * 13])
 def test_predict_rejects_invalid_features(features):
     response = service.app.test_client().post(

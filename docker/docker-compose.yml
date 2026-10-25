@@ -1,16 +1,120 @@
-version: "3.8"
-
 services:
   ml-app:
-    image: ghcr.io/novikov0534/ml-prediction-service/ml-app:latest
+    image: ${ML_APP_IMAGE:-ghcr.io/novikov0534/ml-prediction-service/ml-app:latest}
+    restart: unless-stopped
+    networks:
+    - monitoring
+    logging: &id001
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: '2'
     container_name: ml-app
     env_file:
-      - .env
+    - .env
     environment:
       DB_HOST: 10.10.10.101
       DB_NAME: ml_predictions
       DB_USER: ml_app
       DB_SSLMODE: require
     ports:
-      - "127.0.0.1:5000:5000"
+    - 127.0.0.1:5000:5000
+    healthcheck:
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/health', timeout=3).read()
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+  node-exporter:
+    image: prom/node-exporter:v1.12.0
     restart: unless-stopped
+    networks:
+    - monitoring
+    logging: *id001
+    container_name: node-exporter
+    pid: host
+    command:
+    - --path.procfs=/host/proc
+    - --path.sysfs=/host/sys
+    - --path.rootfs=/rootfs
+    volumes:
+    - /proc:/host/proc:ro
+    - /sys:/host/sys:ro
+    - /:/rootfs:ro,rslave
+  prometheus:
+    image: prom/prometheus:v3.5.5
+    restart: unless-stopped
+    networks:
+    - monitoring
+    logging: *id001
+    container_name: prometheus
+    command:
+    - --config.file=/etc/prometheus/prometheus.yml
+    - --storage.tsdb.path=/prometheus
+    - --storage.tsdb.retention.time=3d
+    - --storage.tsdb.retention.size=512MB
+    volumes:
+    - ../monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    - ../monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+    - prometheus-data:/prometheus
+    ports:
+    - 127.0.0.1:9090:9090
+  alertmanager:
+    image: prom/alertmanager:v0.34.1
+    restart: unless-stopped
+    networks:
+    - monitoring
+    logging: *id001
+    container_name: alertmanager
+    command:
+    - --config.file=/etc/alertmanager/alertmanager.yml
+    - --storage.path=/alertmanager
+    - --cluster.listen-address=
+    volumes:
+    - ../monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    - alertmanager-data:/alertmanager
+    ports:
+    - 127.0.0.1:9093:9093
+  grafana:
+    image: grafana/grafana:12.4.13
+    restart: unless-stopped
+    networks:
+    - monitoring
+    logging: *id001
+    container_name: grafana
+    env_file:
+    - ../monitoring/.monitoring.env
+    environment:
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_ANALYTICS_REPORTING_ENABLED: 'false'
+      GF_ANALYTICS_CHECK_FOR_UPDATES: 'false'
+    volumes:
+    - grafana-data:/var/lib/grafana
+    - ../monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    - ../monitoring/grafana-dashboard.json:/var/lib/grafana/dashboards/ml-overview.json:ro
+    ports:
+    - 127.0.0.1:3000:3000
+  alert-receiver:
+    image: ${ML_APP_IMAGE:-ghcr.io/novikov0534/ml-prediction-service/ml-app:latest}
+    restart: unless-stopped
+    networks:
+    - monitoring
+    logging: *id001
+    container_name: alert-receiver
+    command:
+    - python
+    - -u
+    - /monitoring/notification_receiver.py
+    volumes:
+    - ../monitoring/notification_receiver.py:/monitoring/notification_receiver.py:ro
+volumes:
+  prometheus-data: {}
+  grafana-data: {}
+  alertmanager-data: {}
+networks:
+  monitoring:
+    driver: bridge

@@ -1,0 +1,22 @@
+#!/bin/bash
+set -euo pipefail
+umask 077
+
+backup_dir=/var/backups/ml-predictions
+exec 9>"$backup_dir/.backup.lock"
+flock -n 9 || exit 0
+
+stamp=$(date -u +%Y%m%dT%H%M%SZ)
+backup_file="$backup_dir/ml_predictions_$stamp.dump"
+temporary_file=$(mktemp "$backup_dir/.backup.XXXXXX")
+trap 'rm -f "$temporary_file"' EXIT
+
+pg_dump --no-password --format=custom \
+  --file="$temporary_file" ml_predictions
+pg_restore --list "$temporary_file" >/dev/null
+mv "$temporary_file" "$backup_file"
+
+find "$backup_dir" -maxdepth 1 -type f \
+  -name 'ml_predictions_*.dump' -mmin +10080 -print -delete
+
+echo "Backup created: $backup_file"

@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily ML database backup at 02:00 Volgograd
+
+[Timer]
+OnCalendar=*-*-* 02:00:00 Europe/Volgograd
+Persistent=true
+
+[Install]
+WantedBy=timers.target
