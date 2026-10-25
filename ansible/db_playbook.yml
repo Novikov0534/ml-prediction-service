@@ -1,0 +1,82 @@
+---
+- name: Configure PostgreSQL server
+  hosts: db
+  become: true
+
+  tasks:
+    - name: Install PostgreSQL and dependencies
+      apt:
+        name:
+          - postgresql-14
+          - postgresql-contrib
+          - python3-psycopg2
+          - acl
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Enable and start PostgreSQL
+      service:
+        name: postgresql
+        state: started
+        enabled: true
+
+    - name: Configure application database
+      become_user: postgres
+      block:
+        - name: Maintain application role and preserve password
+          community.postgresql.postgresql_user:
+            name: ml_app
+            role_attr_flags: LOGIN,NOSUPERUSER,NOCREATEDB,NOCREATEROLE
+            no_password_changes: true
+            state: present
+
+        - name: Ensure database exists
+          community.postgresql.postgresql_db:
+            name: ml_predictions
+            state: present
+
+        - name: Ensure predictions table exists
+          community.postgresql.postgresql_table:
+            db: ml_predictions
+            name: public.predictions
+            columns:
+              - id SERIAL PRIMARY KEY
+              - timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+              - input_data JSONB NOT NULL
+              - prediction JSONB NOT NULL
+              - model_version VARCHAR(50) NOT NULL
+            state: present
+
+        - name: Check current PUBLIC permissions
+          community.postgresql.postgresql_query:
+            db: ml_predictions
+            query: |
+              SELECT
+                has_database_privilege(
+                  'public', 'ml_predictions', 'CONNECT'
+                ) AS public_database,
+                has_schema_privilege(
+                  'public', 'public', 'CREATE'
+                ) AS public_schema;
+          register: public_acl
+          changed_when: false
+
+        - name: Maintain database permissions
+          community.postgresql.postgresql_privs:
+            database: ml_predictions
+            type: "{{ item.type }}"
+            objs: "{{ item.objs }}"
+            privs: "{{ item.privs }}"
+            roles: "{{ item.roles }}"
+            state: "{{ item.state }}"
+          when: >-
+            item.roles != 'PUBLIC' or
+            (public_acl.query_result[0]['public_' + item.type] | bool)
+          loop:
+            - {type: database, objs: ml_predictions, privs: CONNECT, roles: PUBLIC, state: absent}
+            - {type: schema, objs: public, privs: CREATE, roles: PUBLIC, state: absent}
+            - {type: database, objs: ml_predictions, privs: CONNECT, roles: ml_app, state: present}
+            - {type: schema, objs: public, privs: USAGE, roles: ml_app, state: present}
+            - {type: table, objs: predictions, privs: 'SELECT,INSERT', roles: ml_app, state: present}
+            - {type: sequence, objs: predictions_id_seq, privs: USAGE, roles: ml_app, state: present}

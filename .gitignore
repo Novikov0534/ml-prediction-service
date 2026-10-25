@@ -9,3 +9,12 @@ model/*.pkl
 !model/.gitkeep
 
 docker/.env
+
+# Local Terraform files and secrets
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.tfvars.json
+crash.log

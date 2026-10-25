@@ -1,0 +1,88 @@
+---
+- name: Configure Docker and ML application
+  hosts: app
+  become: true
+
+  vars:
+    project_dir: /home/student/ml-prediction-service
+
+  tasks:
+    - name: Check required application files
+      stat:
+        path: "{{ project_dir }}/docker/{{ item }}"
+        get_checksum: false
+      loop:
+        - docker-compose.yml
+        - .env
+      register: project_files
+
+    - name: Require existing configuration and secrets
+      assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+        fail_msg: "Required file is missing; restore it before deployment."
+      loop: "{{ project_files.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Ensure Docker packages are installed
+      apt:
+        name:
+          - docker.io
+          - docker-compose-v2
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Enable and start Docker
+      service:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Ensure student belongs to Docker group
+      user:
+        name: student
+        groups: docker
+        append: true
+
+    - name: Protect existing environment file
+      file:
+        path: "{{ project_dir }}/docker/.env"
+        owner: student
+        group: student
+        mode: '0600'
+
+    - name: Reconcile ML application with Compose
+      become_user: student
+      command:
+        argv:
+          - docker
+          - compose
+          - --ansi
+          - never
+          - -f
+          - docker-compose.yml
+          - up
+          - -d
+          - --no-build
+          - --pull
+          - missing
+        chdir: "{{ project_dir }}/docker"
+      register: compose_result
+      changed_when: >-
+        (compose_result.stdout ~ compose_result.stderr)
+        is search(' (Creating|Created|Recreate|Recreated|Starting|Started)')
+
+    - name: Check ML API health
+      uri:
+        url: http://127.0.0.1:5000/health
+        return_content: true
+        status_code: 200
+      register: api_health
+      until:
+        - api_health.status == 200
+        - (api_health.json | default({})).get('status') == 'ok'
+      retries: 12
+      delay: 5
