@@ -15,7 +15,7 @@ jobs:
         with:
           python-version: '3.10'
       - run: pip install -r app/requirements-dev.txt
-      - run: flake8 app model --max-line-length=120
+      - run: flake8 app model logger_service --max-line-length=120
 
   test:
     needs: lint
@@ -27,7 +27,7 @@ jobs:
           python-version: '3.10'
       - run: pip install -r app/requirements-dev.txt
       - run: python model/train.py
-      - run: python -m pytest -q app/tests
+      - run: python -m pytest -q app/tests logger_service/tests
 
   build_and_push:
     needs: test
@@ -40,8 +40,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Log in to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-      - name: Build and publish image
+      - name: Build and publish both services
         run: |
-          IMAGE=ghcr.io/novikov0534/ml-prediction-service/ml-app:latest
-          docker build -f docker/Dockerfile -t "$IMAGE" .
-          docker push "$IMAGE"
+          BASE=ghcr.io/novikov0534/ml-prediction-service
+          docker build -f docker/Dockerfile -t "$BASE/prediction-service:latest" -t "$BASE/prediction-service:${{ github.sha }}" .
+          docker build -f docker/Dockerfile.logger -t "$BASE/logger-service:latest" -t "$BASE/logger-service:${{ github.sha }}" .
+          docker push "$BASE/prediction-service:${{ github.sha }}"
+          docker push "$BASE/logger-service:${{ github.sha }}"
+          docker push "$BASE/prediction-service:latest"
+          docker push "$BASE/logger-service:latest"

@@ -1,5 +1,5 @@
 [Unit]
-Description=Update ML app from GHCR
+Description=Update prediction and logger services from GHCR
 Wants=network-online.target
 After=network-online.target docker.service
 

@@ -1,5 +1,5 @@
 ---
-- name: Configure Docker and ML application
+- name: Configure Docker and ML microservices
   hosts: app
   become: true
 
@@ -9,11 +9,15 @@
   tasks:
     - name: Check required application files
       stat:
-        path: "{{ project_dir }}/docker/{{ item }}"
+        path: "{{ project_dir }}/{{ item }}"
         get_checksum: false
       loop:
-        - docker-compose.yml
-        - .env
+        - docker/docker-compose.yml
+        - docker/.env
+        - monitoring/.monitoring.env
+        - monitoring/prometheus.yml
+        - monitoring/alerts.yml
+        - monitoring/notification_receiver.py
       register: project_files
 
     - name: Require existing configuration and secrets
@@ -47,14 +51,37 @@
         groups: docker
         append: true
 
-    - name: Protect existing environment file
+    - name: Protect existing environment files
       file:
-        path: "{{ project_dir }}/docker/.env"
+        path: "{{ project_dir }}/{{ item }}"
         owner: student
         group: student
         mode: '0600'
+      loop:
+        - docker/.env
+        - monitoring/.monitoring.env
 
-    - name: Reconcile ML application with Compose
+    - name: Pull latest microservice images
+      become_user: student
+      command:
+        argv:
+          - docker
+          - compose
+          - --ansi
+          - never
+          - -f
+          - docker-compose.yml
+          - pull
+          - prediction-service
+          - logger-service
+          - alert-receiver
+        chdir: "{{ project_dir }}/docker"
+      register: pull_result
+      changed_when: >-
+        (pull_result.stdout ~ pull_result.stderr)
+        is search('Downloaded newer image|Download complete|Pull complete')
+
+    - name: Reconcile microservices and monitoring with Compose
       become_user: student
       command:
         argv:
@@ -68,16 +95,17 @@
           - -d
           - --no-build
           - --pull
-          - missing
+          - never
+          - --remove-orphans
         chdir: "{{ project_dir }}/docker"
       register: compose_result
       changed_when: >-
         (compose_result.stdout ~ compose_result.stderr)
         is search(' (Creating|Created|Recreate|Recreated|Starting|Started)')
 
-    - name: Check ML API health
+    - name: Check both service health endpoints
       uri:
-        url: http://127.0.0.1:5000/health
+        url: "{{ item }}"
         return_content: true
         status_code: 200
       register: api_health
@@ -86,3 +114,6 @@
         - (api_health.json | default({})).get('status') == 'ok'
       retries: 12
       delay: 5
+      loop:
+        - http://127.0.0.1:5000/health
+        - http://127.0.0.1:5001/health

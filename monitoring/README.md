@@ -1,49 +1,26 @@
-# Лабораторная работа 7
+# Мониторинг микросервисов ЛР8
 
-## Мониторинг на ВМ102
-Стек: ML API, Prometheus, Node Exporter, Alertmanager,
-Grafana и локальный получатель webhook-уведомлений.
+Prometheus собирает четыре цели: prediction-service, logger-service,
+node-exporter и prometheus. Интервал 15 секунд.
+Grafana автоматически загружает datasource и JSON дашборда из этого каталога.
+Дашборд /d/ml-overview содержит 12 панелей, включая запросы logger,
+ошибки БД logger и ошибки HTTP-вызовов prediction → logger.
 
-Секреты: docker/.env содержит DB_PASSWORD,
-monitoring/.monitoring.env содержит GF_SECURITY_ADMIN_PASSWORD.
-Оба файла исключены из Git.
+ml_predictions_total считает вычисленные предсказания, включая ответы
+при отказе logger. Успешная запись отдельно учитывается
+logger_requests_total{status="success"}. Счётчики обнуляются при рестарте.
+ml_model_accuracy — результат 5-fold cross-validation при сборке,
+не онлайн-оценка качества. Histogram охватывает весь /predict, включая HTTP.
 
-Сборка из корня проекта:
-    docker build -f docker/Dockerfile -t ml-app:lab7 .
+Оповещения: MLServiceDown (prediction), LoggerServiceDown, LoggerErrors,
+PredictionLoggerErrors, HighPredictionLatency, LowModelAccuracy,
+NoPredictionsReceived. Уведомления принимает alert-receiver.
+Команда: docker logs --since 10m alert-receiver
 
-Запуск локального образа:
-    ML_APP_IMAGE=ml-app:lab7 docker compose -f docker/docker-compose.yml up -d
+Порты привязаны к 127.0.0.1 ВМ102. Браузер подключается через SSH-туннель:
+Grafana 3000, Prometheus 9090, Alertmanager 9093.
+Секреты docker/.env и monitoring/.monitoring.env исключены из Git.
 
-Без ML_APP_IMAGE используется образ GHCR latest.
-До публикации lab7 таймер ml-deploy.timer отключён.
-
-Доступ через SSH-туннель:
-Grafana — localhost:3000/d/ml-overview, логин admin.
-Prometheus — localhost:9090/targets.
-Alertmanager — localhost:9093.
-Источник данных и дашборд Grafana загружаются автоматически.
-
-## Метрики и оповещения
-/metrics: запросы, успешные предсказания по классам,
-задержка запросов, ошибки БД и информация о модели.
-ml_model_accuracy — средняя точность стратифицированной
-кросс-валидации по пяти разбиениям при сборке, не оценка дрейфа.
-
-Правила: недоступность API, высокая задержка, низкая точность,
-ошибки БД и отсутствие предсказаний.
-Уведомления: docker logs --since 10m alert-receiver
-
-Healthcheck проверяет /health.
-restart: unless-stopped обеспечивает перезапуск при завершении процесса.
-Статус unhealthy сам по себе контейнер не перезапускает.
-
-## Резервные копии на ВМ100
-Файлы конфигурации находятся в backup/.
-Скрипт: /usr/local/sbin/ml-db-backup.
-Каталог: /var/backups/ml-predictions, postgres, права 0700.
-Служба ml-db-backup.service работает от postgres.
-Таймер: ежедневно 02:00 Europe/Volgograd, Persistent=true.
-Автоматические копии хранятся семь дней.
-Формат custom, восстановление через pg_restore.
-Ручная копия lab7_initial.dump исключена из автоматической ротации.
-Восстановление проверено в базе ml_predictions_restore_lab7.
+Резервное копирование на ВМ100 сохранено: ml-db-backup.timer ежедневно
+в 02:00 Europe/Volgograd; автоматические дампы хранятся семь дней.
+Скрипт и systemd units находятся в backup/.

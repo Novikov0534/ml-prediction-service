@@ -1,22 +1,18 @@
 services:
-  ml-app:
-    image: ${ML_APP_IMAGE:-ghcr.io/novikov0534/ml-prediction-service/ml-app:latest}
+  prediction-service:
+    image: ${PREDICTION_IMAGE:-ghcr.io/novikov0534/ml-prediction-service/prediction-service:latest}
     restart: unless-stopped
     networks:
     - monitoring
-    logging: &id001
+    logging:
       driver: json-file
       options:
         max-size: 5m
         max-file: '2'
-    container_name: ml-app
-    env_file:
-    - .env
+    container_name: prediction-service
     environment:
-      DB_HOST: 10.10.10.101
-      DB_NAME: ml_predictions
-      DB_USER: ml_app
-      DB_SSLMODE: require
+      LOGGER_URL: http://logger-service:5001/log
+      MODEL_PATH: /model/model.pkl
     ports:
     - 127.0.0.1:5000:5000
     healthcheck:
@@ -29,12 +25,49 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+    depends_on:
+      logger-service:
+        condition: service_healthy
+  logger-service:
+    image: ${LOGGER_IMAGE:-ghcr.io/novikov0534/ml-prediction-service/logger-service:latest}
+    restart: unless-stopped
+    networks:
+    - monitoring
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: '2'
+    container_name: logger-service
+    env_file:
+    - .env
+    environment:
+      DB_HOST: 10.10.10.101
+      DB_NAME: ml_predictions
+      DB_USER: ml_app
+      DB_SSLMODE: require
+    ports:
+    - 127.0.0.1:5001:5001
+    healthcheck:
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://127.0.0.1:5001/health', timeout=3).read()
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
   node-exporter:
     image: prom/node-exporter:v1.12.0
     restart: unless-stopped
     networks:
     - monitoring
-    logging: *id001
+    logging: &id001
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: '2'
     container_name: node-exporter
     pid: host
     command:
@@ -99,7 +132,7 @@ services:
     ports:
     - 127.0.0.1:3000:3000
   alert-receiver:
-    image: ${ML_APP_IMAGE:-ghcr.io/novikov0534/ml-prediction-service/ml-app:latest}
+    image: ${LOGGER_IMAGE:-ghcr.io/novikov0534/ml-prediction-service/logger-service:latest}
     restart: unless-stopped
     networks:
     - monitoring

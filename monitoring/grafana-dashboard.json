@@ -17,7 +17,7 @@
   "panels": [
     {
       "id": 1,
-      "title": "Successful predictions per second",
+      "title": "Computed predictions per second",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -33,7 +33,7 @@
         {
           "refId": "A",
           "expr": "sum(rate(ml_predictions_total[5m]))",
-          "legendFormat": "Successful predictions per second"
+          "legendFormat": "Computed predictions per second"
         }
       ],
       "fieldConfig": {
@@ -90,7 +90,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "ml_model_accuracy{evaluation=\"stratified_cv5\"}",
+          "expr": "ml_model_accuracy{job=\"prediction-service\",evaluation=\"stratified_cv5\"}",
           "legendFormat": "Model accuracy from 5-fold cross-validation"
         }
       ],
@@ -104,7 +104,7 @@
     },
     {
       "id": 4,
-      "title": "Database errors in 5 minutes",
+      "title": "Logger database errors in 5 minutes",
       "type": "stat",
       "datasource": {
         "type": "prometheus",
@@ -119,7 +119,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(increase(ml_db_errors_total[5m]))",
+          "expr": "sum(increase(logger_db_errors_total[5m]))",
           "legendFormat": "Database errors in 5 minutes"
         }
       ],
@@ -220,7 +220,7 @@
     },
     {
       "id": 8,
-      "title": "ML app availability",
+      "title": "Prediction service availability",
       "type": "stat",
       "datasource": {
         "type": "prometheus",
@@ -235,10 +235,126 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "up{job=\"ml-app\"}",
+          "expr": "up{job=\"prediction-service\"}",
           "legendFormat": "ML app availability"
         }
       ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 9,
+      "title": "Logger requests per second",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status) (rate(logger_requests_total[5m]))",
+          "legendFormat": "{{status}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 10,
+      "title": "Logger DB errors in 5 minutes",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "increase(logger_db_errors_total[5m])",
+          "legendFormat": "Logger DB errors in 5 minutes"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 11,
+      "title": "Prediction logger errors in 5 minutes",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "increase(ml_logger_errors_total[5m])",
+          "legendFormat": "Prediction logger errors in 5 minutes"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 12,
+      "title": "Logger service availability",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "up{job=\"logger-service\"}",
+          "legendFormat": "Logger service availability"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short"

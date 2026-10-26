@@ -1,27 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
-IMAGE=ghcr.io/novikov0534/ml-prediction-service/ml-app:latest
-COMPOSE=/home/student/ml-prediction-service/docker/docker-compose.yml
-
-current=$(docker inspect --format '{{.Image}}' ml-app 2>/dev/null || true)
-if ! timeout 900s docker pull "$IMAGE"; then echo "Pull failed; existing app remains running" >&2; exit 1; fi
-available=$(docker image inspect --format '{{.Id}}' "$IMAGE")
-
-if [ "$current" = "$available" ]; then
-    echo "Image unchanged; deployment not needed"
-    exit 0
+PROJECT=/home/student/ml-prediction-service
+COMPOSE="$PROJECT/docker/docker-compose.yml"
+# The timer deploys published images; local test overrides must not leak here.
+unset ML_APP_IMAGE PREDICTION_IMAGE LOGGER_IMAGE
+cd "$PROJECT"
+if ! timeout 900s docker compose -f "$COMPOSE" pull prediction-service logger-service alert-receiver; then
+    echo "Pull failed; running containers were not replaced" >&2
+    exit 1
 fi
-
-docker compose -f "$COMPOSE" up -d
-
-for attempt in {1..15}; do
-    if curl -fsS http://127.0.0.1:5000/health >/dev/null; then
-        echo "Deployment successful: $available"
+docker compose -f "$COMPOSE" up -d --no-build --pull never --remove-orphans
+for attempt in {1..20}; do
+    ready=1
+    for container in prediction-service logger-service; do
+        health=$(docker inspect --format '{{.State.Health.Status}}' "$container" 2>/dev/null || true)
+        if [ "$health" != healthy ]; then ready=0; fi
+    done
+    if [ "$ready" -eq 1 ]; then
+        echo "Deployment successful: prediction-service and logger-service healthy"
         exit 0
     fi
-    sleep 2
+    sleep 3
 done
-
-echo "Deployment failed: health check did not pass" >&2
+echo "Deployment failed: services did not become healthy" >&2
 exit 1

@@ -3,16 +3,19 @@ import os
 import pickle
 import time
 import json
+import logging
+import urllib.error
+import urllib.request
 from pathlib import Path
 
-import psycopg2
-from psycopg2.extras import Json
 from flask import Flask, Response, g, jsonify, request
 from prometheus_client import (
     CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest,
 )
 
 app = Flask(__name__)
+app.logger.setLevel(logging.INFO)
+LOGGER_URL = os.getenv("LOGGER_URL", "http://logger-service:5001/log")
 
 with open(os.getenv("MODEL_PATH", "/model/model.pkl"), "rb") as file:
     model = pickle.load(file)
@@ -22,14 +25,14 @@ REQUESTS_TOTAL = Counter(
     "ml_requests_total", "Prediction requests by HTTP status", ["status"]
 )
 PREDICTIONS_TOTAL = Counter(
-    "ml_predictions_total", "Predictions successfully saved to the database",
+    "ml_predictions_total", "Computed predictions regardless of logging outcome",
     ["model_version", "predicted_class"],
 )
 PREDICTION_LATENCY = Histogram(
     "ml_prediction_latency_seconds", "Full prediction request duration",
     buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10),
 )
-DB_ERRORS_TOTAL = Counter("ml_db_errors_total", "Database write failures")
+LOGGER_ERRORS_TOTAL = Counter("ml_logger_errors_total", "Failed logger calls")
 MODEL_INFO = Gauge("ml_model_info", "Loaded model version", ["version"])
 MODEL_INFO.labels(version=MODEL_VERSION).set(1)
 MODEL_ACCURACY = Gauge(
@@ -71,7 +74,7 @@ def metrics():
 
 @app.get("/health")
 def health():
-    return jsonify({"status": "ok"})
+    return jsonify({"status": "ok", "service": "prediction"})
 
 
 @app.post("/predict")
@@ -96,36 +99,45 @@ def predict():
         "probability": float(max(model.predict_proba([features])[0])),
     }
 
-    try:
-        connection = psycopg2.connect(
-            host=os.getenv("DB_HOST", "10.10.10.101"),
-            port=int(os.getenv("DB_PORT", "5432")),
-            dbname=os.getenv("DB_NAME", "ml_predictions"),
-            user=os.getenv("DB_USER", "ml_app"),
-            password=os.environ["DB_PASSWORD"],
-            sslmode=os.getenv("DB_SSLMODE", "require"),
-            connect_timeout=5,
-        )
-        try:
-            with connection:
-                with connection.cursor() as cursor:
-                    cursor.execute(
-                        """INSERT INTO predictions
-                           (input_data, prediction, model_version)
-                           VALUES (%s, %s, %s)""",
-                        (Json({"features": features}), Json(result), "wine-rf-v1"),
-                    )
-        finally:
-            connection.close()
-    except psycopg2.Error:
-        DB_ERRORS_TOTAL.inc()
-        app.logger.exception("Database insert failed")
-        return jsonify({"error": "Database unavailable"}), 503
-
     PREDICTIONS_TOTAL.labels(
         model_version=MODEL_VERSION, predicted_class=str(result["class"])
     ).inc()
-    return jsonify(result)
+    payload = json.dumps({
+        "input_data": {"features": features},
+        "prediction": result,
+        "model_version": MODEL_VERSION,
+    }).encode("utf-8")
+    log_request = urllib.request.Request(
+        LOGGER_URL, data=payload,
+        headers={"Content-Type": "application/json"}, method="POST",
+    )
+    logged = False
+    log_id = None
+    try:
+        with urllib.request.urlopen(log_request, timeout=8) as response:
+            if response.status != 201:
+                raise ValueError("Logger did not confirm creation")
+            confirmation = json.loads(response.read(65536))
+            if not isinstance(confirmation, dict):
+                raise ValueError("Invalid logger confirmation")
+            log_id = confirmation.get("id")
+            if (
+                confirmation.get("status") != "logged"
+                or not isinstance(log_id, int)
+                or isinstance(log_id, bool)
+                or log_id <= 0
+            ):
+                raise ValueError("Invalid logger record id")
+            logged = True
+    except (urllib.error.URLError, OSError, ValueError):
+        LOGGER_ERRORS_TOTAL.inc()
+        app.logger.exception("Logger request failed; returning computed prediction")
+
+    answer = {**result, "logged": logged}
+    if logged:
+        answer["log_id"] = log_id
+        app.logger.info("Logger confirmed prediction id=%s", log_id)
+    return jsonify(answer)
 
 
 if __name__ == "__main__":

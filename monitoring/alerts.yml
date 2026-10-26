@@ -3,7 +3,7 @@ groups:
   interval: 15s
   rules:
   - alert: MLServiceDown
-    expr: up{job="ml-app"} == 0
+    expr: up{job="prediction-service"} == 0
     for: 1m
     labels:
       severity: critical
@@ -23,17 +23,31 @@ groups:
       severity: warning
     annotations:
       summary: Build-time cross-validation accuracy is below 90 percent
-  - alert: DBPredictionErrors
-    expr: increase(ml_db_errors_total[5m]) > 3
+  - alert: LoggerErrors
+    expr: increase(logger_db_errors_total[5m]) > 3
     for: 1m
     labels:
       severity: warning
     annotations:
-      summary: More than three database write failures in five minutes
+      summary: More than three logger database write failures in five minutes
   - alert: NoPredictionsReceived
     expr: sum(rate(ml_predictions_total[10m])) == 0
     for: 10m
     labels:
       severity: warning
     annotations:
-      summary: No successful predictions during the observation window
+      summary: No computed predictions during the observation window
+  - alert: LoggerServiceDown
+    expr: up{job="logger-service"} == 0
+    for: 1m
+    labels:
+      severity: critical
+    annotations:
+      summary: Logger service unavailable for more than one minute
+  - alert: PredictionLoggerErrors
+    expr: increase(ml_logger_errors_total[5m]) > 3
+    for: 1m
+    labels:
+      severity: warning
+    annotations:
+      summary: More than three failed calls from prediction to logger in five minutes

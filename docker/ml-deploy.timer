@@ -1,5 +1,5 @@
 [Unit]
-Description=Check GHCR for a new ML app image
+Description=Check GHCR for new prediction and logger images
 
 [Timer]
 OnBootSec=1min
